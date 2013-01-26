@@ -1,8 +1,8 @@
-%define source_url https://bitbucket.org/winebarrel/describe-spot-price-history/raw/1de78e06292296e3bbc40abc5a9f9d122dc44eba/describe-spot-price-history
+%define source_url https://bitbucket.org/winebarrel/describe-spot-price-history/raw/45e972b852d03bcf62ac001dc69b456aa9145ef6/describe-spot-price-history
 
 Summary: describe-spot-price-history
 Name: describe-spot-price-history
-Version: 0.1.0
+Version: 0.1.1
 Release: 1
 License: BSD
  
