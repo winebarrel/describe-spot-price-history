@@ -184,6 +184,8 @@ ARGV.options do |opt|
       filters << [name, value]
     }
 
+    opt.on('-h', '--help') { puts opt.help; exit 1 }
+
     opt.parse!
 
     # IAM: ReadOnlyAccess
