@@ -1,0 +1,235 @@
+#!/usr/bin/env ruby
+require 'cgi'
+require 'base64'
+require 'net/https'
+require 'openssl'
+require 'optparse'
+require 'rexml/document'
+require 'rexml/parsers/pullparser'
+require 'time'
+require 'yaml'
+
+Version = '0.1.0'
+
+YAML::ENGINE.yamler = 'syck' if RUBY_VERSION =~ /\A1\.9/
+
+Net::HTTP.version_1_2
+
+class EC2Client
+  API_VERSION = '2012-12-01'
+  SIGNATURE_VERSION = 2
+  SIGNATURE_ALGORITHM = :SHA256
+
+  def initialize(accessKeyId, secretAccessKey, endpoint = nil)
+    @accessKeyId = accessKeyId
+    @secretAccessKey = secretAccessKey
+    @endpoint = endpoint
+
+    if /\A[^.]+\Z/ =~ @endpoint
+      @endpoint = "ec2.#{@endpoint}.amazonaws.com"
+    end
+  end
+
+  def spot_price_history(params = {}, filters = [])
+    filters.each_with_index do |nv, i|
+      name, value = nv
+      n = i + 1
+      params["Filter.#{n}.Name"] = name
+      params["Filter.#{n}.Value"] = value
+    end
+
+    source = query('DescribeSpotPriceHistory', params)
+
+    if /<Response>\s*<Errors>\s*<Error>/ =~ source
+      errors = []
+
+      REXML::Document.new(source).each_element('//Errors/Error') do |element|
+        code = element.text('Code')
+        message = element.text('Message')
+        errors << "#{code}:#{message}"
+      end
+
+      raise errors.join(', ') unless errors.empty?
+    end
+
+    parser = REXML::Parsers::PullParser.new(source)
+
+    instance_type = nil
+    product_description = nil
+    spot_price = nil
+    timestamp = nil
+    availability_zone = nil
+
+    while parser.has_next?
+      event = parser.pull
+      next if event.event_type != :start_element
+
+      case event[0]
+      when 'instanceType'
+        instance_type = parser.pull[0]
+      when 'productDescription'
+        product_description = parser.pull[0]
+      when 'spotPrice'
+        spot_price = parser.pull[0]
+      when 'timestamp'
+        timestamp = Time.parse(parser.pull[0]).iso8601
+      when 'availabilityZone'
+        availability_zone = parser.pull[0]
+        yield [instance_type, product_description, spot_price, timestamp, availability_zone]
+      end
+    end
+  end
+
+  private
+
+  def query(action, params = {})
+    params = {
+      :Action           => action,
+      :Version          => API_VERSION,
+      :Timestamp        => Time.now.getutc.strftime('%Y-%m-%dT%H:%M:%SZ'),
+      :SignatureVersion => SIGNATURE_VERSION,
+      :SignatureMethod  => "Hmac#{SIGNATURE_ALGORITHM}",
+      :AWSAccessKeyId   => @accessKeyId,
+    }.merge(params)
+
+    signature = aws_sign(params)
+    params[:Signature] = signature
+
+    https = Net::HTTP.new(@endpoint, 443)
+    https.use_ssl = true
+    https.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+    https.start do |w|
+      req = Net::HTTP::Post.new('/',
+        'Host' => @endpoint,
+        'Content-Type' => 'application/x-www-form-urlencoded'
+      )
+
+      req.set_form_data(params)
+      res = w.request(req)
+
+      unless res.kind_of?(Net::HTTPOK)
+        raise "#{res.code} #{res.message}"
+      end
+
+      res.body
+    end
+  end
+
+  def aws_sign(params)
+    params = params.sort_by {|a, b| a.to_s }.map {|k, v| "#{CGI.escape(k.to_s)}=#{CGI.escape(v.to_s)}" }.join('&')
+    string_to_sign = "POST\n#{@endpoint}\n/\n#{params}"
+    digest = OpenSSL::HMAC.digest(OpenSSL::Digest.const_get(SIGNATURE_ALGORITHM).new, @secretAccessKey, string_to_sign)
+    Base64.encode64(digest).gsub("\n", '')
+  end
+end # EC2Client
+
+# main
+access_key = nil
+secret_key = nil
+endpoint = nil
+params = {}
+filters = []
+sort_idx = []
+reverse = false
+separator = nil
+
+sort_attrs = {
+  /\b(?:instance_?)?type\b/i            => 0,
+  /\b(?:product_?)?desc(?:ription)?\b/i => 1,
+  /\b(?:spot_?)?price\b/i               => 2,
+  /\btime(?:stamp)?\b/i                 => 3,
+  /\b(?:availability_?)?zone\b/i        => 4,
+}
+
+ARGV.options do |opt|
+  begin
+    opt.on('-k', '--access-key ACCESS_KEY') {|v| access_key = v }
+    opt.on('-s', '--secret-key SECRET_KEY') {|v| secret_key = v }
+    opt.on('-r', '--region REGION') {|v| endpoint = v }
+    opt.on(''  , '--start-time TIME') {|v| params['StartTime'] = Time.parse(v).iso8601 }
+    opt.on(''  , '--end-time TIME')   {|v| params['EndTime'] = Time.parse(v).iso8601 }
+    opt.on('-t', '--types TYPE_LIST', Array) {|v| v.each_with_index {|t, i| params["InstanceType.#{i + 1}"] = t } }
+    opt.on('-d', '--descs DESC_LIST', Array) {|v| v.each_with_index {|t, i| params["ProductDescription.#{i + 1}"] = t } }
+    opt.on('-z', '--zone AVAILABILITY_ZONE') {|v| params['AvailabilityZone'] = v }
+    opt.on(''  , '--max MAX_RESULTS') {|v| params['MaxResults'] = v }
+
+    opt.on(''  , '--sort ATTR_LIST', Array) {|attr_list|
+      attr_list.each do |attr|
+        attr.strip!
+        rgx, idx = sort_attrs.find {|r, i| r =~ attr }
+        sort_idx << idx if idx
+      end
+    }
+
+    opt.on(''  , '--reverse') { reverse = true }
+    opt.on(''  , '--csv') { separator = ',' }
+    opt.on(''  , '--tsv') { separator = "\t" }
+
+    opt.on('-f', '--filter FILTER') {|v|
+      name, value = v.split(/\s*=\s*/, 2)
+      filters << [name, value]
+    }
+
+    opt.parse!
+
+    # IAM: ReadOnlyAccess
+    access_key ||= ENV['AWS_ACCESS_KEY_ID']
+    secret_key ||= ENV['AWS_SECRET_ACCESS_KEY']
+    endpoint   ||= (ENV['EC2_ENDPOING'] || ENV['EC2_REGION'])
+
+    unless access_key and secret_key and endpoint
+      puts opt.help
+      exit 1
+    end
+
+    if (availability_zone = params['AvailabilityZone'])
+      region = endpoint
+
+      if region =~ /\Aec2\.([^.]+)\.amazonaws.com\Z/
+        region = $1
+      end
+
+      if availability_zone =~ /\A[a-z]\Z/i
+        params['AvailabilityZone'] = region + availability_zone
+      end
+    end
+  rescue => e
+    $stderr.puts e
+    exit 1
+  end
+end
+
+def to_yaml_style; :inline; end
+
+ec2cli = EC2Client.new(access_key, secret_key, endpoint)
+
+unless separator
+  class NilClass; def to_yaml(h={}); YAML::quick_emit(nil,h) {|o| o.scalar(taguri,'~',:plain) }; end; end
+  puts '---'
+end
+
+def print_row(row, separator)
+  puts(separator ? row.join(separator) : YAML.dump(row).slice(2..-1))
+rescue Errno::EPIPE
+  exit 0
+end
+
+if sort_idx.empty? and not reverse
+  ec2cli.spot_price_history(params, filters) do |row|
+    print_row(row, separator)
+  end
+else
+  rows = []
+
+  ec2cli.spot_price_history(params, filters) do |row|
+    rows << row
+  end
+
+  rows = rows.sort_by {|i| i.values_at(*sort_idx) } unless sort_idx.empty?
+  rows.reverse! if reverse
+
+  rows.each do |row|
+    print_row(row, separator)
+  end
+end
