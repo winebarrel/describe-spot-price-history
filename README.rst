@@ -21,6 +21,9 @@ Usage
       -d, --descs DESC_LIST
       -z, --zone AVAILABILITY_ZONE
           --max MAX_RESULTS
+          --head N
+          --tail N
+          --attrs ATTR_LIST
           --sort ATTR_LIST
           --reverse
           --csv
