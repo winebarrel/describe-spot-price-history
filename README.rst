@@ -9,6 +9,7 @@ a command line tool for describing the Spot Price history.
 Usage
 -----
  ::
+
   shell> describe-spot-price-history -h
   Usage: describe-spot-price-history [options]
       -k, --access-key ACCESS_KEY
