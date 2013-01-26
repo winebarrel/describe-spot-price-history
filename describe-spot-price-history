@@ -9,7 +9,7 @@ require 'rexml/parsers/pullparser'
 require 'time'
 require 'yaml'
 
-Version = '0.1.0'
+Version = '0.1.1'
 
 YAML::ENGINE.yamler = 'syck' if RUBY_VERSION =~ /\A1\.9/
 
@@ -130,11 +130,13 @@ secret_key = nil
 endpoint = nil
 params = {}
 filters = []
+attr_idx = []
 sort_idx = []
 reverse = false
 separator = nil
+head_tail = []
 
-sort_attrs = {
+attrs = {
   /\b(?:instance_?)?type\b/i            => 0,
   /\b(?:product_?)?desc(?:ription)?\b/i => 1,
   /\b(?:spot_?)?price\b/i               => 2,
@@ -154,10 +156,21 @@ ARGV.options do |opt|
     opt.on('-z', '--zone AVAILABILITY_ZONE') {|v| params['AvailabilityZone'] = v }
     opt.on(''  , '--max MAX_RESULTS') {|v| params['MaxResults'] = v }
 
+    opt.on(''  , '--head N') {|v| head_tail << v.to_i }
+    opt.on(''  , '--tail N') {|v| head_tail << -(v.to_i) }
+
+    opt.on(''  , '--attrs ATTR_LIST', Array) {|attr_list|
+      attr_list.each do |attr|
+        attr.strip!
+        rgx, idx = attrs.find {|r, i| r =~ attr }
+        attr_idx << idx if idx
+      end
+    }
+
     opt.on(''  , '--sort ATTR_LIST', Array) {|attr_list|
       attr_list.each do |attr|
         attr.strip!
-        rgx, idx = sort_attrs.find {|r, i| r =~ attr }
+        rgx, idx = attrs.find {|r, i| r =~ attr }
         sort_idx << idx if idx
       end
     }
@@ -215,7 +228,7 @@ rescue Errno::EPIPE
   exit 0
 end
 
-if sort_idx.empty? and not reverse
+if attr_idx.empty? and sort_idx.empty? and not reverse and head_tail.all? {|i| i.zero? }
   ec2cli.spot_price_history(params, filters) do |row|
     print_row(row, separator)
   end
@@ -228,6 +241,16 @@ else
 
   rows = rows.sort_by {|i| i.values_at(*sort_idx) } unless sort_idx.empty?
   rows.reverse! if reverse
+
+  head_tail.each do |n|
+    if n > 0
+      rows = rows[0, n]
+    elsif n < 0
+      rows = rows[n..-1]
+    end
+  end
+
+  rows = rows.map {|i| i.values_at(*attr_idx) } unless attr_idx.empty?
 
   rows.each do |row|
     print_row(row, separator)
