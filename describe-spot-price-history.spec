@@ -2,7 +2,7 @@
 
 Summary: describe-spot-price-history
 Name: describe-spot-price-history
-Version: 0.1.1
+Version: 0.1.2
 Release: 1
 License: BSD
  

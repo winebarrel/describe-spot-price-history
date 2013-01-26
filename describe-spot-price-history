@@ -9,7 +9,7 @@ require 'rexml/parsers/pullparser'
 require 'time'
 require 'yaml'
 
-Version = '0.1.1'
+Version = '0.1.2'
 
 YAML::ENGINE.yamler = 'syck' if RUBY_VERSION =~ /\A1\.9/
 
