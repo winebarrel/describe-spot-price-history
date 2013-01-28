@@ -188,7 +188,6 @@ ARGV.options do |opt|
 
     opt.parse!
 
-    # IAM: ReadOnlyAccess
     access_key ||= ENV['AWS_ACCESS_KEY_ID']
     secret_key ||= ENV['AWS_SECRET_ACCESS_KEY']
     endpoint   ||= (ENV['EC2_ENDPOING'] || ENV['EC2_REGION'])
