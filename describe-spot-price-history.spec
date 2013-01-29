@@ -2,12 +2,14 @@
 
 Summary: describe-spot-price-history
 Name: describe-spot-price-history
-Version: 0.1.3
+Version: 0.1.4
 Release: 1
 License: BSD
  
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildArch: noarch
+
+Requires: ruby
  
 %description
 a command line tool for describing the Spot Price history.
