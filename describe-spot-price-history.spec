@@ -1,4 +1,4 @@
-%define source_url https://bitbucket.org/winebarrel/describe-spot-price-history/raw/4fe73c66ae0be7c5145a18957118562bf407e732/describe-spot-price-history
+%define source_url https://bitbucket.org/winebarrel/describe-spot-price-history/raw/6d1ee327a99cfe0dd154aae347b3a8ac330ccc2a/describe-spot-price-history
 
 Summary: describe-spot-price-history
 Name: describe-spot-price-history
