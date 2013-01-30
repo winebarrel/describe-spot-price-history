@@ -9,7 +9,7 @@ require 'rexml/parsers/pullparser'
 require 'time'
 require 'yaml'
 
-Version = '0.1.4'
+Version = '0.1.5'
 
 YAML::ENGINE.yamler = 'syck' if RUBY_VERSION =~ /\A1\.9/
 
@@ -75,7 +75,7 @@ class EC2Client
         timestamp = Time.parse(parser.pull[0]).iso8601
       when 'availabilityZone'
         availability_zone = parser.pull[0]
-        yield [instance_type, product_description, spot_price, timestamp, availability_zone]
+        yield [instance_type || '', product_description || '', spot_price || '', timestamp || '', availability_zone || '']
       end
     end
   end
